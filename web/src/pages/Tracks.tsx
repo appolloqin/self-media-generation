@@ -161,7 +161,15 @@ export default function TrackPage() {
 
   const renderField = (key: keyof ExpertTrack, value: unknown) => {
     if (key === 'defaultParams') {
-      const text = JSON.stringify(value ?? {}, null, 2);
+      let obj: unknown = value ?? {};
+      if (typeof obj === 'string') {
+        try {
+          obj = JSON.parse(obj);
+        } catch {
+          obj = {};
+        }
+      }
+      const text = JSON.stringify(obj ?? {}, null, 2);
       return text === '{}' ? '—' : <pre className="mb-0 whitespace-pre-wrap text-xs">{text}</pre>;
     }
     if (key === 'enabled') return value ? <Tag color="green">已启用</Tag> : <Tag>已停用</Tag>;

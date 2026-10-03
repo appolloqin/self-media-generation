@@ -148,7 +148,7 @@ class CopywritingService {
     const content = await llmService.chat({
       system,
       user,
-      temperature: req.mode === 'imitate' ? 0.95 : 0.88,
+      temperature: req.mode === 'imitate' ? 0.75 : 0.88,
       maxTokens: 6000,
     });
 
@@ -218,11 +218,11 @@ function buildSystemPrompt(scene: CopywritingScene, knobs: KnobValue[], mode: st
   const knobText = knobs.length
     ? `\n## 旋钮设定\n${knobs.map((k) => `- ${k.label}：${k.value}`).join('\n')}`
     : '';
-  const modeText =
+    const modeText =
     mode === 'imitate'
-      ? '按参考内容的骨架与节奏仿写，只换题材与细节，不要抄袭原句。'
+      ? '按参考内容的信息骨架与口气仿写，只换你要写的主题细节，不要抄原句，不要另起文学场景。'
       : mode === 'transform'
-        ? '在保留原意基础上重写，换一种完全不同的表达方式。'
+        ? '保留原意换表达，但不要改成无关的故事、剧本或氛围描写。'
         : '完全原创，不模仿任何已有内容。';
 
   return [
@@ -243,7 +243,7 @@ function buildSystemPrompt(scene: CopywritingScene, knobs: KnobValue[], mode: st
     '## 硬性要求',
     '- 直接输出文案正文，不要任何解释、前言、序号',
     '- 禁止使用「综上所述」「值得注意的是」等 AI 味连接词',
-    '- 内容必须具体，给出数字、场景、细节',
+    '- 内容必须具体，给出数字、步骤或可感知细节，禁止无关文学场景',
     '- 禁止 Markdown 代码块',
   ]
     .filter(Boolean)
@@ -254,7 +254,7 @@ function buildUserPrompt(req: CopywritingGenerateRequest, scene: CopywritingScen
   const parts = [`主题：${req.topic}`];
   if (req.targetForm) parts.push(`目标形式：${req.targetForm}`);
   if (req.referenceContent?.trim()) {
-    parts.push(`\n参考内容：\n${req.referenceContent.slice(0, 3000)}`);
+    parts.push(`\n参考内容：\n${req.referenceContent.slice(0, 8000)}`);
   }
   parts.push('\n请输出文案。');
   void scene;

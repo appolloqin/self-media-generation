@@ -2,7 +2,7 @@ import { query, queryOne, run, transaction } from '../db/connection.js';
 import { llmService } from './llm.service.js';
 import { logger } from '../core/logger.js';
 import { configService } from './config.service.js';
-import { extractTitle, htmlToMarkdown, countWords } from '../utils/content.js';
+import { htmlToMarkdown, markdownToHtml, escapeHtml } from '../utils/content.js';
 import type { PageDesignConfig, Template } from '@smg/shared';
 
 class TemplateService {
@@ -126,25 +126,50 @@ class TemplateService {
     run('DELETE FROM templates WHERE category = ?', [name]);
   }
 
-  /** 按配置挑选一个模板（指定名称 > 指定分类 > 全局随机） */
-  pickTemplate(): Template | null {
+  /** 按配置与本次请求挑选模板：指定名称 > 分类 > 选题匹配；不再全局随机 */
+  pickTemplate(hint?: { name?: string; category?: string; topic?: string }): Template | null {
     const cfg = configService.get();
-    const explicit = cfg.template?.trim();
-    if (explicit) {
-      const t = this.findByName(explicit, cfg.templateCategory || undefined);
-      if (t) return t;
+    const name = hint?.name?.trim() || cfg.template?.trim();
+    if (name) {
+      const t = this.findByName(name, hint?.category || cfg.templateCategory || undefined);
+      if (t && t.name !== '_blank') return t;
     }
 
-    const category = cfg.templateCategory?.trim();
+    const category =
+      hint?.category?.trim() || cfg.templateCategory?.trim() || guessTemplateCategory(hint?.topic ?? '');
     let pool = category ? this.list(category) : this.list();
     pool = pool.filter((t) => t.name !== '_blank');
-    if (pool.length === 0) return null;
+    if (!pool.length) {
+      pool = this.list().filter((t) => t.name !== '_blank');
+    }
+    if (!pool.length) return null;
 
-    return pool[Math.floor(Math.random() * pool.length)];
+    const card = pool.find((t) => t.name.includes('卡片式'));
+    return card ?? pool[0];
+  }
+
+  /** 把正文填进模板占位符，不经过 LLM */
+  applyTemplate(tpl: Template, title: string, content: string): string {
+    const md = /<[a-z][\s\S]*>/i.test(content) ? htmlToMarkdown(content) : content;
+    let html = tpl.content || DEFAULT_TEMPLATE;
+
+    html = html.replace(/\{\{TITLE\}\}/g, escapeHtml(title));
+    html = html.replace(/\{\{DATE\}\}/g, formatTplDate());
+    html = html.replace(/\{\{COVER\}\}/g, '');
+
+    const slotCount = (html.match(/\{\{CONTENT\}\}/g) ?? []).length;
+    const chunks = splitForSlots(md, Math.max(1, slotCount));
+    for (let i = 0; i < slotCount; i++) {
+      html = html.replace('{{CONTENT}}', markdownToHtml(chunks[i] ?? ''));
+    }
+    html = html.replace(/\{\{CONTENT\}\}/g, '');
+    html = html.replace(/<img[^>]*src=["'][\s]*["'][^>]*>/gi, '');
+    html = html.replace(/<section[^>]*>\s*<\/section>/gi, '');
+    return html;
   }
 
   /**
-   * 用 LLM 将内容填充进模板，保持视觉风格
+   * 用 LLM 将内容填充进模板（仅手动重排时使用；流水线默认走 applyTemplate）
    */
   async fillTemplate(content: string, title: string, tpl: Template): Promise<string> {
     const cfg = configService.get();
@@ -185,6 +210,42 @@ class TemplateService {
       return '';
     }
   }
+}
+
+function formatTplDate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function guessTemplateCategory(topic: string): string {
+  const t = topic;
+  if (/短剧|工具|开源|部署|代码|GitHub|模型|数码|科技|AI|Node|Docker|FFmpeg/.test(t)) return 'TechDigital';
+  if (/财经|股票|基金|理财|投资/.test(t)) return 'FinanceInvestment';
+  if (/健康|养生|医疗/.test(t)) return 'HealthWellness';
+  if (/旅行|美食|攻略/.test(t)) return 'FoodTravel';
+  if (/职场|面试|求职/.test(t)) return 'CareerDevelopment';
+  if (/情感|恋爱|婚姻/.test(t)) return 'EmotionPsychology';
+  if (/新闻|时事|热点/.test(t)) return 'NewsCurrentAffairs';
+  if (/学习|教育|考试/.test(t)) return 'EducationLearning';
+  return 'TechDigital';
+}
+
+function splitForSlots(md: string, n: number): string[] {
+  if (n <= 1) return [md];
+  const parts = md
+    .split(/(?=^#{1,3}\s)/m)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.length) return Array.from({ length: n }, () => '');
+  const chunks: string[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i < n - 1) chunks.push(parts[i] ?? '');
+    else chunks.push(parts.slice(i).join('\n\n'));
+  }
+  return chunks;
 }
 
 /** 压缩模板以降低 token 消耗 */

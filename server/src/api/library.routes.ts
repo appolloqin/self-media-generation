@@ -190,6 +190,7 @@ r.post(
         style: z.string().optional(),
         count: z.number().int().min(1).max(4).optional(),
         presetId: z.number().int().optional(),
+        watermark: z.boolean().optional(),
       })
       .parse(req.body);
 
@@ -202,7 +203,7 @@ r.post(
         style = style || preset.name;
       }
     }
-    ok(res, await imageService.generate(prompt, { size: body.size, style, count: body.count }), 201);
+    ok(res, await imageService.generate(prompt, { size: body.size, style, count: body.count, watermark: body.watermark }), 201);
   }),
 );
 

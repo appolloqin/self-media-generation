@@ -26,10 +26,10 @@ class CreativeService {
     return DIMENSION_CATEGORIES;
   }
 
-  /** 依据选题自动挑选维度（优先 emotion / audience / style / theme） */
+  /** 依据选题自动挑选维度：只选能整词命中的受众/情绪/主题，绝不随机套场景或文体 */
   autoSelect(topic: string, maxDimensions = 3): SelectedDimension[] {
     const cats = this.categories();
-    const priority = ['emotion', 'audience', 'style', 'theme', 'scene', 'perspective', 'structure', 'rhythm'];
+    const priority = ['audience', 'emotion', 'theme'];
     const picked: SelectedDimension[] = [];
     const used = new Set<string>();
 
@@ -52,25 +52,22 @@ class CreativeService {
     return picked;
   }
 
-  /** 基于关键词命中率挑选最贴题的选项 */
+  /** 必须整词命中选项名，避免「小说转剧本」误配成文体「小说」 */
   private pickByTopic(topic: string, cat: DimensionCategoryMeta) {
-    const text = topic.toLowerCase();
+    const text = topic.trim();
+    if (!text) return null;
     let best: { value: string; description?: string; hits: number } | null = null;
 
     for (const opt of cat.options) {
-      let hits = 0;
-      if (text.includes(opt.value)) hits += 3;
-      if (opt.value.length >= 2 && text.includes(opt.value.slice(0, 2))) hits += 1;
-      if (opt.description && text.includes(opt.description.slice(0, 2))) hits += 1;
-      if (hits > 0 && (!best || hits > best.hits)) {
+      if (!opt.value || opt.value.length < 2) continue;
+      if (!text.includes(opt.value)) continue;
+      const hits = opt.value.length;
+      if (!best || hits > best.hits) {
         best = { value: opt.value, description: opt.description, hits };
       }
     }
 
-    if (best) return best;
-    // 兜底随机
-    const rand = cat.options[Math.floor(Math.random() * cat.options.length)];
-    return rand ? { value: rand.value, description: rand.description } : null;
+    return best ? { value: best.value, description: best.description } : null;
   }
 
   /** 校验维度组合兼容性 */
@@ -125,9 +122,10 @@ class CreativeService {
 ## 维度化创意要求（强度：${strength}）
 ${lines.join('\n')}
 
-请在保持核心事实与观点不变的前提下，按上述维度对文章进行整体重写：
+请在保持核心事实、数字、步骤与观点不变的前提下，按上述维度调整口气与节奏：
 - 维度之间需相互协调，不要机械堆砌
-- 至少在以下 3 个方面产生可感知的差异：开头方式 / 段落节奏 / 用词习惯
+- 禁止另起无关文学场景（图书馆、推门、书架、深夜氛围等）
+- 不要把说明/测评改成小说、剧本或寓言
 - 不要在文中提及"维度""风格"等元概念
 `;
   }
@@ -138,6 +136,7 @@ ${lines.join('\n')}
     title: string,
     dims: SelectedDimension[],
     intensity = 1,
+    preserveCore = true,
   ): Promise<string> {
     if (dims.length === 0) return content;
 
@@ -153,6 +152,7 @@ ${prompt}
 - 字数与原文接近（±25%）
 - 不得使用 Markdown 代码块
 - 不得出现"以下是""综上所述"等套话
+- ${preserveCore ? '核心信息、专有名词、版本号与操作步骤必须保留' : '允许较大幅度改写，但仍不得编造事实'}
 - ${warnings.length ? `注意：${warnings.join('；')}` : ''}`,
         user: `原文标题：${title}\n\n原文正文：\n${content}`,
         temperature: 0.9,

@@ -262,6 +262,11 @@
   padding: 12px 0;
 }
 
+/* 隐藏 Ant Design Sider 默认底部深蓝折叠条（改用顶栏自定义按钮） */
+.ant-layout-sider-trigger {
+  display: none !important;
+}
+
 .ant-layout-sider .ant-menu-item {
   margin-inline: 10px !important;
   width: calc(100% - 20px) !important;

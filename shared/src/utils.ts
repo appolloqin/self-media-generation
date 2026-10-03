@@ -27,6 +27,7 @@ export const DEFAULT_IMAGE_API: ImageApiConfig = {
   apiBase: '',
   model: 'seedream-3.0',
   size: '1792x1024',
+  watermark: false,
 };
 
 /** 设置页模型快捷选项（写入 model 字段，实际以网关支持为准） */
@@ -66,21 +67,21 @@ export const DEFAULT_DIMENSIONAL: DimensionalCreativeConfig = {
 
 export const DEFAULT_PAGE_DESIGN: PageDesignConfig = {
   useOriginalStyles: true,
-  container: { maxWidth: 750, marginHorizontal: 10, backgroundColor: '#f8f9fa' },
+  container: { maxWidth: 677, marginHorizontal: 16, backgroundColor: '#ffffff' },
   card: {
-    borderRadius: 12,
-    boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
-    padding: 24,
+    borderRadius: 0,
+    boxShadow: 'none',
+    padding: 0,
     backgroundColor: '#ffffff',
   },
   typography: {
-    baseFontSize: 16,
-    lineHeight: 1.6,
-    headingScale: 1.5,
+    baseFontSize: 17,
+    lineHeight: 1.85,
+    headingScale: 1.2,
     textColor: '#333333',
-    headingColor: '#333333',
+    headingColor: '#1a1a1a',
   },
-  spacing: { sectionMargin: 24, elementMargin: 16 },
+  spacing: { sectionMargin: 28, elementMargin: 18 },
   accent: {
     primaryColor: '#3a7bd5',
     secondaryColor: '#00b09b',

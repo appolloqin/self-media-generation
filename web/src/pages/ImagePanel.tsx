@@ -9,6 +9,7 @@ import {
   Row,
   Col,
   Tag,
+  Switch,
   App as AntApp,
 } from 'antd';
 import { PictureOutlined, EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
@@ -65,6 +66,7 @@ export default function ImagePanel() {
           apiBase: values.apiBase ?? '',
           model: values.model ?? '',
           size: values.size ?? '1792x1024',
+          watermark: values.watermark ?? false,
         },
       });
       message.success('图片生成配置已保存');
@@ -179,6 +181,21 @@ export default function ImagePanel() {
           {(currentType === 'pollinations' || currentType === 'picsum') && (
             <Form.Item name="size" label="默认尺寸">
               <Select options={SIZE_OPTIONS} />
+            </Form.Item>
+          )}
+
+          {currentType !== 'none' && currentType !== 'picsum' && (
+            <Form.Item
+              name="watermark"
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  生成水印
+                  <HintTip title="Seedream / 即梦等网关默认会在右下角加「AI生成」水印。关闭后请求会显式传入 watermark=false。封面与图库均使用此默认值，图库生成时可单独覆盖。" />
+                </span>
+              }
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="加水印" unCheckedChildren="无水印" />
             </Form.Item>
           )}
 

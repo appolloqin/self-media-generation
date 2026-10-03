@@ -328,11 +328,12 @@ export class DeAiEngine {
     if (cfg.injectEmotion && score.humanScore < cfg.targetHumanScore + 5) {
       try {
         const withEmotion = await llmService.chat({
-          system: `你是中文写作高手。请在【保持原意、保持长度基本不变】的前提下，为下面这段文字注入强烈的主观色彩：
-1. 适当加入第一人称立场与个人偏见
-2. 加入 2-3 处反问句或感叹
-3. 把中性客观的措辞换成更有情绪的表达
-4. 不要出现任何 AI 味连接词（如"综上所述""值得注意的是"）`,
+          system: `你是中文写作高手。请在【保持原意、保持长度基本不变】的前提下，为下面这段文字加入人的口气：
+1. 可以有判断和取舍，但不要编造经历
+2. 最多 1-2 处反问，不要通篇感叹
+3. 禁止另起文学场景（图书馆、推门、深夜氛围）
+4. 事实、数字、步骤必须保留
+5. 不要出现任何 AI 味连接词（如"综上所述""值得注意的是"）`,
           user: current,
           temperature: 1.0,
           maxTokens: 8000,
@@ -382,7 +383,7 @@ function buildDeAiSystemPrompt(
   if (d.paragraphLengthVariance < 0.4) problems.push(`段落长度过于整齐（变异系数 ${d.paragraphLengthVariance}）`);
   if (d.fillerRatio > 0.12) problems.push(`虚词密度偏高（${(d.fillerRatio * 100).toFixed(1)}%）`);
   if (d.parallelStructureRatio > 0.15) problems.push(`并列句式过多（"不仅…而且…"类）`);
-  if (d.emotionWords < 5) problems.push('缺乏第一人称与情感表达');
+  if (d.emotionWords < 5) problems.push('口气偏说明书，可增加判断与口语，但不要编故事');
 
   return `你是一位深谙"去AI味"对抗检测的资深中文编辑。这是第 ${attempt} 轮重写。
 
@@ -397,10 +398,10 @@ ${problems.length ? problems.map((p, i) => `${i + 1}. ${p}`).join('\n') : '1. �
 ## 重写要求
 1. **结构粉碎**：打散工整的列表与段落，长短句交错，避免"总-分-总"完美结构
 2. **禁用词汇**：${AI_CONNECTORS.slice(0, 12).join('、')} 等一律不得出现
-3. **情感注入**：加入第一人称视角、主观偏见、适量反问句，拒绝客观中立
+3. **情感注入**：可加入判断和口语，但不得另起文学场景，不得把说明/测评改成故事
 4. **用词 DNA**：${dna ? `参考风格用词倾向：${dna}` : '使用更接地气的大众口语'}
-5. **细节具体化**：把抽象概括换成具体场景、具体数字、具体感受
-6. **保持原意**：不改变核心观点与事实，只是换一种"人说的话"的方式表达
+5. **细节具体化**：把抽象概括换成可核对的数字、步骤、案例，不要编造场景小品
+6. **保持原意**：不改变核心观点与事实，专有名词、版本号、操作路径必须保留
 7. **长度**：与原文接近（±20%），不得大幅删减
 
 ## 严格禁止

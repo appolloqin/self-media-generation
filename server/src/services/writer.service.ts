@@ -94,33 +94,48 @@ class WriterService {
     try {
       /* ---- 阶段 1：确定选题 ---- */
       report('init');
+      const mode = request.mode ?? 'custom';
       let topic = (request.topic ?? '').trim();
-      if (!topic || request.mode === 'hot') {
+      if (mode === 'hot' || (!topic && mode !== 'reference')) {
         const picked = await hotNewsService.pickTopic();
         topic = topic || picked.topic;
         report('init', `选题来源：${picked.platform} 热榜`);
       }
       const platform = (request.platform ?? cfg.publishPlatform) as PublishPlatform;
-      report('init', `平台：${platform}，主题：${topic}`);
 
       /* ---- 阶段 2：热点信息增强 ---- */
       let context = '';
       report('hot');
-      if (request.mode === 'hot' || !topic) {
+      if (mode === 'hot') {
         const horses = await this.enrichByHot(topic);
         if (horses) context += horses;
       }
 
       /* ---- 阶段 3：联网搜索 / 参考素材 ---- */
       report('search');
-      const pack = await this.loadReferences(request, topic);
+      const pack = await this.loadReferences(request, topic, mode);
+      if (mode === 'reference' && !topic) {
+        topic = pack.titles[0]?.trim() || '参考文章仿写';
+      }
+      if (!topic) throw new Error('请填写选题，或在仿写模式下提供可抓取的参考链接');
+      report('init', `平台：${platform}，主题：${topic}`);
       if (pack.materials) context += `\n${pack.materials}`;
+      if (mode === 'reference' && !pack.materials) {
+        throw new Error('参考文章抓取失败，请确认链接可访问后再试');
+      }
 
       /* ---- 阶段 4：专家赛道与维度 ---- */
       const track = request.trackId ? this.getTrack(request.trackId) : null;
       const trackTemplate = request.trackTemplateId ? this.getTrackTemplate(request.trackTemplateId) : null;
+      const userDimensions = (request.dimensions ?? []).length > 0;
       let dimensions: SelectedDimension[] = request.dimensions ?? [];
-      if (cfg.dimensionalCreative.enabled && !dimensions.length && cfg.dimensionalCreative.autoDimensionSelection) {
+      // 仿写默认不套随机场景维度，否则会把测评稿改成「古老图书馆」之类文学壳
+      if (
+        mode !== 'reference' &&
+        cfg.dimensionalCreative.enabled &&
+        !userDimensions &&
+        cfg.dimensionalCreative.autoDimensionSelection
+      ) {
         dimensions = creativeService.autoSelect(topic, cfg.dimensionalCreative.maxDimensions);
         if (dimensions.length) {
           report('search', `自动选择维度：${dimensions.map((d) => d.option).join('、')}`);
@@ -133,22 +148,25 @@ class WriterService {
         topic,
         platform,
         context,
+        mode,
         track,
         trackTemplate,
-        dimensions,
+        dimensions: mode === 'reference' && !userDimensions ? [] : dimensions,
         ctl,
         report,
       });
       if (ctl.stop) throw new Error('任务已被手动停止');
 
       /* ---- 阶段 6：维度化创意 ---- */
-      if (cfg.dimensionalCreative.enabled && dimensions.length) {
+      const dimsForTransform = mode === 'reference' && !userDimensions ? [] : dimensions;
+      if (cfg.dimensionalCreative.enabled && dimsForTransform.length) {
         report('creative');
         const transformed = await creativeService.transform(
           draft.content,
           draft.title,
-          dimensions,
+          dimsForTransform,
           cfg.dimensionalCreative.creativeIntensity,
+          cfg.dimensionalCreative.preserveCoreInfo,
         );
         if (transformed !== draft.content) {
           draft.content = transformed;
@@ -161,7 +179,7 @@ class WriterService {
         report('deai');
         const result = await deAiEngine.run(draft.content, {
           config: deAiCfg,
-          reference: pack.materials || undefined,
+          reference: mode === 'reference' && deAiCfg.referenceStyle ? pack.materials : undefined,
           onAttempt: (attempt, score) =>
             logger.info(`去 AI 味第 ${attempt} 轮，当前人工率 ${score.humanScore}%`),
         });
@@ -181,16 +199,21 @@ class WriterService {
       const format: ArticleFormat = cfg.articleFormat;
       if (format === 'html') {
         if (cfg.useTemplate) {
-          const tpl = templateService.pickTemplate();
+          const tpl = templateService.pickTemplate({
+            name: request.reference?.templateName,
+            category: request.reference?.templateCategory,
+            topic,
+          });
           if (tpl) {
-            const filled = await templateService.fillTemplate(draft.content, draft.title, tpl);
-            if (filled) {
-              html = filled;
-              draft.metadata.template = tpl.name;
-            }
+            html = templateService.applyTemplate(tpl, draft.title, draft.content);
+            draft.metadata.template = tpl.name;
+            report('layout', `已套用模板「${tpl.name}」`);
           }
-        }
-        if (html === draft.content) {
+          if (!tpl || html === draft.content) {
+            html = layoutService.localHtml(draft.content, draft.title, cfg.pageDesign);
+            draft.metadata.template = draft.metadata.template ?? 'local';
+          }
+        } else {
           html = await layoutService.designHtml(draft.content, draft.title, platform, cfg.pageDesign);
         }
         html = layoutService.renderContentHtml(html, draft.title);
@@ -291,11 +314,17 @@ class WriterService {
     }
   }
 
-  private async loadReferences(request: GenerateRequest, topic: string): Promise<ReferencePack> {
+  private async loadReferences(
+    request: GenerateRequest,
+    topic: string,
+    mode: GenerateRequest['mode'],
+  ): Promise<ReferencePack> {
     const urls: string[] = [];
-    const library = searchService.searchLibrary(topic, 3);
-    for (const item of library) {
-      if (item.url) urls.push(item.url);
+    if (mode !== 'reference') {
+      const library = searchService.searchLibrary(topic, 3);
+      for (const item of library) {
+        if (item.url) urls.push(item.url);
+      }
     }
     for (const u of request.reference?.urls ?? []) urls.push(u);
 
@@ -309,7 +338,8 @@ class WriterService {
 
     const materials = results
       .map((r, i) => {
-        const body = r.content.slice(0, 2500);
+        const limit = mode === 'reference' && i === 0 ? 12000 : 2500;
+        const body = r.content.slice(0, limit);
         return `### 参考素材 ${i + 1}：${r.title}\n来源：${r.url}\n${body}`;
       })
       .join('\n\n');
@@ -330,6 +360,7 @@ class WriterService {
     topic: string;
     platform: PublishPlatform;
     context: string;
+    mode: GenerateRequest['mode'];
     track: any;
     trackTemplate: any;
     dimensions: SelectedDimension[];
@@ -337,19 +368,38 @@ class WriterService {
     report: StageReporter;
   }): Promise<ContentResult> {
     const cfg = configService.get();
-    const { topic, platform, context, track, trackTemplate, dimensions, ctl } = args;
+    const { topic, platform, context, mode, track, trackTemplate, dimensions, ctl } = args;
     const maxWords = trackTemplate?.word_max ?? cfg.maxArticleLen;
     const minWords = trackTemplate?.word_min ?? cfg.minArticleLen;
+    const imitate = mode === 'reference';
 
     /* ---- 1. 规划智能体：生成提纲 ---- */
-    const outline = await this.planOutline({ topic, platform, context, track, trackTemplate, dimensions, minWords, maxWords });
+    const outline = await this.planOutline({
+      topic,
+      platform,
+      context,
+      mode,
+      track,
+      trackTemplate,
+      dimensions,
+      minWords,
+      maxWords,
+    });
 
     /* ---- 2. 写作智能体：分段扩写 ---- */
-    const segments = outline.sections.length ? outline.sections : [
-      { heading: '开篇', requirement: '用一个具体场景或反常识观点切入' },
-      { heading: '正文', requirement: '展开论证，给出具体细节与数据' },
-      { heading: '结尾', requirement: '给出行动建议或开放性思考' },
-    ];
+    const segments = outline.sections.length
+      ? outline.sections
+      : imitate
+        ? [
+            { heading: '痛点切入', requirement: '用原文同类的具体麻烦开场，不要文学场景' },
+            { heading: '核心能力', requirement: '讲清楚产品/方法比常见做法强在哪，给可核对的细节' },
+            { heading: '怎么上手', requirement: '步骤、限制和风险写明白，方便读者照做' },
+          ]
+        : [
+            { heading: '开篇', requirement: '用具体麻烦、可核对事实或反常识判断切入，不要文学氛围描写' },
+            { heading: '正文', requirement: '展开论证，给出数字、案例或可执行步骤' },
+            { heading: '结尾', requirement: '给出行动建议或限制说明' },
+          ];
 
     const chunks: string[] = [];
     for (let i = 0; i < segments.length; i++) {
@@ -360,6 +410,7 @@ class WriterService {
         topic,
         platform,
         context,
+        mode,
         style: trackTemplate?.style ?? track?.style ?? '',
         heading: seg.heading,
         requirement: seg.requirement,
@@ -376,7 +427,7 @@ class WriterService {
     const wordCount = countWords(content);
 
     /* ---- 3. 标题智能体 ---- */
-    const title = await this.makeTitle(topic, content, platform);
+    const title = await this.makeTitle(topic, content, platform, imitate);
 
     /* ---- 4. 摘要智能体 ---- */
     const summary = extractSummary(content, 150);
@@ -387,7 +438,7 @@ class WriterService {
       summary,
       format: cfg.articleFormat,
       wordCount,
-      metadata: { outline: outline.summary, sections: segments.length },
+      metadata: { outline: outline.summary, sections: segments.length, mode },
     };
   }
 
@@ -396,13 +447,15 @@ class WriterService {
     topic: string;
     platform: PublishPlatform;
     context: string;
+    mode: GenerateRequest['mode'];
     track: any;
     trackTemplate: any;
     dimensions: SelectedDimension[];
     minWords: number;
     maxWords: number;
   }): Promise<{ summary: string; sections: { heading: string; requirement: string }[] }> {
-    const { topic, platform, context, track, trackTemplate, dimensions } = args;
+    const { topic, platform, context, mode, track, trackTemplate, dimensions } = args;
+    const imitate = mode === 'reference';
 
     const sys = [
       '你是一位资深中文内容策划，负责在正式写作前产出可直接指导写手的手写提纲。',
@@ -418,6 +471,22 @@ class WriterService {
       track ? `- 赛道：${track.name}｜读者：${track.audience}｜结构偏好：${track.structure}` : '',
       trackTemplate ? `- 风格：${trackTemplate.style}｜策略：${trackTemplate.strategy}` : '',
       dimensions.length ? creativeService.buildPrompt(dimensions, 1) : '',
+      imitate
+        ? [
+            '',
+            '## 仿写任务（必须遵守）',
+            '- 先拆参考文的信息骨架（痛点 / 方案 / 机制 / 步骤 / 限制），小标题沿用同类功能分段，不要另起一个文学场景',
+            '- 禁止「推开某扇门」「古老图书馆」「书架沉默」等与事实无关的意象框架',
+            '- 开头要求：具体麻烦或可核对事实，不要氛围描写',
+            '- 第一个小标题不得复述全文标题',
+            '- 事实、版本号、路径、限制以参考文为准，不要编造',
+          ].join('\n')
+        : [
+            '',
+            '## 通用写作约束',
+            '- 开头用具体麻烦或可核对事实，禁止无关文学场景（图书馆、推门、深夜氛围）',
+            '- 第一个小标题不得复述拟定标题',
+          ].join('\n'),
       '',
       '## 严格禁止',
       '- 不要输出任何解释文字',
@@ -428,7 +497,7 @@ class WriterService {
 
     const user = [
       `选题：${topic}`,
-      context ? `\n可用背景资料：\n${context.slice(0, 4000)}` : '',
+      context ? `\n可用背景资料：\n${context.slice(0, imitate ? 10000 : 4000)}` : '',
       `\n请产出 ${args.minWords}~${args.maxWords} 字文章的手写提纲。`,
     ]
       .filter(Boolean)
@@ -457,6 +526,7 @@ class WriterService {
     topic: string;
     platform: PublishPlatform;
     context: string;
+    mode: GenerateRequest['mode'];
     heading: string;
     requirement: string;
     words: number;
@@ -465,7 +535,8 @@ class WriterService {
     index: number;
     total: number;
   }): Promise<string> {
-    const { topic, platform, context, heading, requirement, words, style, outline, index, total } = args;
+    const { topic, platform, context, mode, heading, requirement, words, style, outline, index, total } = args;
+    const imitate = mode === 'reference';
 
     const sys = [
       '你是「写作智能体」，一位资深的微信公众号主编。',
@@ -476,9 +547,22 @@ class WriterService {
       '- 绝不使用 Markdown 代码块',
       '- 绝不使用「以下是」「希望对你有帮助」等套话',
       '- 句子长短交错，偶尔出现口语、短句、反问',
-      '- 内容必须具体：给出数字、场景、细节，避免空泛议论',
+      '- 内容必须具体：给出数字、步骤、案例，避免空泛议论',
       `- 本次只写第 ${index + 1} / ${total} 段`,
-    ].join('\n');
+      '- 不要重复输出小标题（小标题已由提纲提供）',
+      '- 禁止把说明、测评、教程写成图书馆、大门、书架、深夜推门等文学场景',
+      imitate
+        ? [
+            '',
+            '## 仿写规则',
+            '- 学参考文的信息密度和分段功能，用自己的句子重写，禁止整段改写原文',
+            '- 技术词保持原样（如 Node.js 22、FFmpeg、Docker Compose），不要拟人',
+            '- 本段只覆盖提纲指定的信息，不要把全文再讲一遍',
+          ].join('\n')
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const user = [
       `选题：${topic}`,
@@ -488,8 +572,8 @@ class WriterService {
       style ? `语言风格：${style}` : '',
       outline ? `全文核心论点：${outline}` : '',
       '',
-      '背景资料（仅供参考，可择要引用）：',
-      context.slice(0, 3000),
+      imitate ? '参考原文（按对应段落取材，不要另起隐喻）：' : '背景资料（仅供参考，可择要引用）：',
+      context.slice(0, imitate ? 8000 : 3000),
       '',
       '直接输出本段正文。',
     ]
@@ -507,17 +591,28 @@ class WriterService {
   }
 
   /** 标题智能体 */
-  private async makeTitle(topic: string, content: string, platform: PublishPlatform): Promise<string> {
+  private async makeTitle(
+    topic: string,
+    content: string,
+    platform: PublishPlatform,
+    imitate = false,
+  ): Promise<string> {
     const sys = [
       '你是「标题智能体」，专门为中文自媒体文章拟标题。',
       '你只输出一条标题，不要任何解释、序号或引号。',
       '',
       '## 要求',
-      '- 长度 12~24 字',
+      '- 长度 12~28 字',
       '- 有具体信息或反差，不要空泛',
       '- 不使用「震惊」「速看」等低质标题党词汇',
       '- 不加书名号以外的标点堆砌',
-    ].join('\n');
+      '- 不要复述正文第一句或第一个小标题',
+      imitate
+        ? '- 仿写时学参考文标题的信息密度（痛点+能力），禁止「推开…之门」「走进…」这类空比喻'
+        : '- 禁止「推开…之门」「走进…图书馆」这类空比喻',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const user = [
       `选题：${topic}`,

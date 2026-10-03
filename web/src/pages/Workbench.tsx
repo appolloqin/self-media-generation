@@ -155,7 +155,11 @@ export default function WorkbenchPage() {
       dimensions: dimensions.length ? dimensions : undefined,
     };
 
-    if (mode === 'reference' && refUrls.length) {
+    if (mode === 'reference') {
+      if (!refUrls.length) {
+        message.warning('仿写模式请先添加至少一条参考文章链接');
+        return;
+      }
       payload.reference = {
         urls: refUrls,
         templateCategory: values.templateCategory || undefined,
@@ -271,7 +275,7 @@ export default function WorkbenchPage() {
                         mode === 'hot'
                           ? '留空则由系统按平台权重自动抽取当日热榜话题'
                           : mode === 'reference'
-                            ? '说明你想基于参考文章写什么方向'
+                            ? '仿写学的是原文的信息骨架和口气，不是另起文学场景。可写「按原文结构介绍同一产品」或你要换成的新选题'
                             : '直接描述你想写的内容'
                       }
                     />
@@ -284,7 +288,7 @@ export default function WorkbenchPage() {
                     mode === 'hot'
                       ? '（可选）指定选题方向，留空自动抓取热点'
                       : mode === 'reference'
-                        ? '例如：参考这三篇爆款的角度，写一篇关于年轻人反内耗的新文章'
+                        ? '例如：按原文结构写同一款开源工具，突出桌面版免部署和长篇连贯性'
                         : '例如：写一篇关于 AI 工具如何改变中小商家的实操指南'
                   }
                 />
@@ -401,14 +405,16 @@ export default function WorkbenchPage() {
                     children: (
                       <div className="space-y-2">
                         <Text type="secondary" className="text-xs">
-                          勾选后由「创意智能体」按维度重写全文。留空则由系统依据选题自动搭配。
+                          {mode === 'reference'
+                            ? '仿写默认关闭自动维度，以免把测评稿改成随机场景。需要再勾选下方标签。'
+                            : '勾选后由「创意智能体」按维度重写全文。留空则由系统依据选题自动搭配（无匹配时不再随机套场景）。'}
                         </Text>
-                        {config?.dimensionalCreative?.autoDimensionSelection && (
+                        {config?.dimensionalCreative?.enabled && (
                           <div className="mb-2">
                             <Switch
                               size="small"
-                              checked={config.dimensionalCreative.enabled}
-                              onChange={(v) => patchConfig({ dimensionalCreative: { enabled: v } })}
+                              checked={config.dimensionalCreative.autoDimensionSelection}
+                              onChange={(v) => patchConfig({ dimensionalCreative: { autoDimensionSelection: v } })}
                             />
                             <Text className="ml-2 text-xs">自动维度搭配</Text>
                           </div>

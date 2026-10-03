@@ -99,6 +99,8 @@ export type ImageApiConfig = {
   model: string;
   /** 默认尺寸，推荐 1024x1024 或 1792x1024 */
   size: string;
+  /** 是否在生成图上叠加服务商水印；Seedream 等默认会加水印，需显式关闭 */
+  watermark: boolean;
 };
 
 export type AppConfig = {

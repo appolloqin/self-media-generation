@@ -5,36 +5,26 @@ import { htmlToMarkdown } from '../utils/content.js';
 import type { PageDesignConfig, PublishPlatform } from '@smg/shared';
 
 const WECHAT_SYSTEM = [
-  '你是微信公众号排版设计专家，请严格按照以下要求设计：',
+  '你是微信公众号排版编辑，目标是「像认真排过的长文」，不是海报，也不是后台卡片。',
   '## 设计目标：',
-  '- 创建一个美观、现代、易读的"中文"移动端网页',
-  '- 纯内联样式：不使用任何外部 CSS、JavaScript，也不使用 <style> 标签',
-  '- 移动优先：专为移动设备设计',
-  '- 模块化结构：所有内容都包裹在 <section style="xx"> 标签中',
-  '- 简洁结构：不包含 <header> 与 <footer> 标签',
-  '- 视觉吸引力：视觉上令人印象深刻',
+  '- 白底、单栏、适合手机阅读的中文正文',
+  '- 纯内联样式：不使用外部 CSS、JavaScript，也不使用 <style> 标签',
+  '- 模块化：内容用 <section> 包裹，不要 <header>/<footer>',
   '',
-  '## 设计风格指导：',
-  '- 色彩方案：使用大胆、酷炫配色，吸引眼球，但不超过三种色系，层次合理',
-  '- 读者感受：一眼喜欢，很高级，易读易懂',
-  '- 排版：符合中文最佳排版实践，利用字号、字重、间距建立清晰视觉层次',
-  '- 卡片式布局：使用圆角、阴影、边距创建卡片 UI 元素',
-  '- 图片处理：大图展示，配合适当圆角与阴影',
+  '## 风格（必须克制）',
+  '- 配色不超过两种：正文深灰 + 一个主色用于小标题或分隔线',
+  '- 禁止大色块背景、禁止整页灰底套白卡片、禁止炫彩渐变',
+  '- 禁止装饰性 SVG、emoji 堆砌、大圆角阴影卡片墙',
+  '- 标题左对齐，22px 左右，不要居中巨号标题',
+  '- 正文 16–17px，行高 1.8–1.9，段间距明显，不要两端对齐撑出大空隙',
+  '- 小标题 18px、加粗、与上文留白，不要再做成另一条文章标题',
   '',
   '## 技术要求：',
-  '- 纯 HTML 结构：只使用 HTML 基本标签与内联样式',
-  '- 内联样式：所有样式通过 style 属性应用在 <section> 上',
-  '- 模块化：使用 <section> 包裹不同内容模块',
-  '- 图片：非必要不配图；若必须配图且找不到有效链接，使用 https://picsum.photos/[宽]/[高]?random=1',
-  '- 可生成炫酷 SVG 动画用于帮助理解或给用户小惊喜',
-  '- 只基于核心主题，不包含作者、版权、URL 等信息',
-  '',
-  '## 其他要求：',
-  '- 先思考排版布局，再填充内容',
-  '- 输出长度：10 屏以内（移动端）',
-  '- 代码必须放在 \`\`\` 标签中',
-  '- 主体内容必须是中文',
+  '- 只使用 HTML 基本标签与内联样式',
+  '- 非必要不配图；不要用 picsum 占位图',
+  '- 不要作者、版权、URL、END 装饰',
   '- 不能使用 position: absolute',
+  '- 输出放在 ``` 代码块中，主体必须是中文',
 ].join('\n');
 
 const PLATFORM_REQUIREMENTS: Record<string, string> = {
@@ -79,10 +69,14 @@ class LayoutService {
       const out = await llmService.chat({
         system,
         user: `请为下面内容设计排版。\n\n标题：${title}\n\n正文：\n${source}`,
-        temperature: 0.7,
+        temperature: 0.4,
         maxTokens: 16000,
       });
-      return extractHtmlBlock(out);
+      const html = extractHtmlBlock(out);
+      if (!html.includes('<section') && !html.includes('<p')) {
+        throw new Error('排版结果缺少正文结构');
+      }
+      return html;
     } catch (err) {
       logger.warn(`AI 排版失败，降级为本地排版: ${(err as Error).message}`);
       return this.localHtml(content, title, pd);
@@ -92,10 +86,14 @@ class LayoutService {
   localHtml(content: string, title: string, pd?: PageDesignConfig): string {
     const cfg = configService.get();
     const p = pd ?? cfg.pageDesign;
-    const base = p.typography.baseFontSize;
-    const lineHeight = p.typography.lineHeight;
+    const base = Math.min(18, Math.max(16, p.typography.baseFontSize));
+    const lineHeight = Math.max(1.75, p.typography.lineHeight);
     const accent = p.accent.primaryColor;
     const highlight = p.accent.highlightBg;
+    const text = p.typography.textColor || '#333333';
+    const heading = p.typography.headingColor || '#1a1a1a';
+    const maxWidth = Math.min(677, p.container.maxWidth || 677);
+    const padX = Math.max(16, p.container.marginHorizontal || 16);
 
     const source = cfg.articleFormat === 'html' ? htmlToMarkdown(content) : content;
     const blocks = source
@@ -105,35 +103,34 @@ class LayoutService {
 
     const body = blocks
       .map((block) => {
-        const heading = block.match(/^(#{1,6})\s+(.*)$/);
-        if (heading) {
-          const level = Math.min(6, heading[1].length + 1);
-          const size = Math.round(base * Math.pow(p.typography.headingScale, heading[1].length - 1));
-          return `<h${level} style="margin:${p.spacing.sectionMargin}px 0 ${p.spacing.elementMargin}px;font-size:${size}px;font-weight:700;color:${p.typography.headingColor};line-height:1.5;">${escapeText(heading[2])}</h${level}>`;
+        const headingMatch = block.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+          const hashes = headingMatch[1].length;
+          const level = Math.min(3, hashes + 1);
+          const size = hashes <= 1 ? 20 : hashes === 2 ? 18 : 16;
+          return `<h${level} style="margin:28px 0 12px;font-size:${size}px;font-weight:700;color:${heading};line-height:1.5;letter-spacing:0.02em;">${escapeText(headingMatch[2])}</h${level}>`;
         }
-        if (/^[-*+]\s+/m.test(block)) {
+        if (/^[-*+]\s+/m.test(block) && block.split('\n').every((l) => !l.trim() || /^[-*+]\s+/.test(l))) {
           const items = block
             .split('\n')
             .map((l) => l.replace(/^[-*+]\s+/, ''))
             .filter(Boolean)
-            .map((t) => `<li style="margin:6px 0;line-height:${lineHeight};">${escapeText(t)}</li>`)
+            .map((t) => `<li style="margin:6px 0;line-height:${lineHeight};">${inlineFormat(t)}</li>`)
             .join('');
-          return `<ul style="margin:${p.spacing.elementMargin}px 0;padding-left:22px;">${items}</ul>`;
+          return `<ul style="margin:8px 0 16px;padding-left:22px;font-size:${base}px;color:${text};">${items}</ul>`;
         }
         if (/^>\s?/m.test(block)) {
-          return `<blockquote style="margin:${p.spacing.elementMargin}px 0;padding:10px 14px;border-left:3px solid ${accent};background:${highlight};color:#555;">${escapeText(block.replace(/^>\s?/gm, ''))}</blockquote>`;
+          return `<blockquote style="margin:16px 0;padding:10px 14px;border-left:3px solid ${accent};background:${highlight};color:#555;font-size:${base}px;line-height:${lineHeight};">${escapeText(block.replace(/^>\s?/gm, ''))}</blockquote>`;
         }
-        return `<p style="margin:${p.spacing.elementMargin}px 0;font-size:${base}px;line-height:${lineHeight};color:${p.typography.textColor};text-align:justify;">${escapeText(block)}</p>`;
+        return `<p style="margin:0 0 18px;font-size:${base}px;line-height:${lineHeight};color:${text};letter-spacing:0.02em;">${inlineFormat(block)}</p>`;
       })
       .join('\n');
 
     return [
-      `<section style="max-width:${p.container.maxWidth}px;margin:0 auto;padding:${p.card.padding}px ${p.container.marginHorizontal}px;background:${p.container.backgroundColor};font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;">`,
-      `  <section style="padding:${p.card.padding}px;background:${p.card.backgroundColor};border-radius:${p.card.borderRadius}px;box-shadow:${p.card.boxShadow};">`,
-      `    <h1 style="margin:0 0 ${p.spacing.sectionMargin}px;font-size:${Math.round(base * p.typography.headingScale * 1.6)}px;line-height:1.4;font-weight:700;color:${p.typography.headingColor};text-align:center;">${escapeText(title)}</h1>`,
-      `    <section style="width:48px;height:3px;background:${accent};margin:0 auto ${p.spacing.sectionMargin}px;border-radius:2px;"></section>`,
-      `    ${body}`,
-      `  </section>`,
+      `<section style="max-width:${maxWidth}px;margin:0 auto;padding:8px ${padX}px 28px;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;">`,
+      `  <h1 style="margin:8px 0 8px;font-size:22px;line-height:1.45;font-weight:700;color:${heading};letter-spacing:0.02em;">${escapeText(title)}</h1>`,
+      `  <section style="width:32px;height:2px;background:${accent};margin:0 0 22px;border-radius:1px;"></section>`,
+      `  ${body}`,
       `</section>`,
     ].join('\n');
   }
@@ -166,15 +163,19 @@ function extractHtmlBlock(text: string): string {
   const firstSection = body.indexOf('<section');
   if (firstSection === -1) return body.trim();
   const lastSection = body.lastIndexOf('</section>');
+  if (lastSection === -1) return body.trim();
   return body.slice(firstSection, lastSection + '</section>'.length);
+}
+
+function inlineFormat(s: string): string {
+  return escapeText(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
 
 function escapeText(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#3a7bd5;">$1</strong>');
+    .replace(/>/g, '&gt;');
 }
 
 export const layoutService = new LayoutService();

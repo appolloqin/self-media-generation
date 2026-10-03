@@ -409,7 +409,7 @@ export const imageApi = {
     return api.upload<ImageAsset[]>('/images/upload', form, onProgress);
   },
   importUrl: (data: { url: string; prompt?: string; style?: string }) => api.post<ImageAsset>('/images/import-url', data),
-  generate: (data: { prompt: string; size?: string; style?: string; count?: number; presetId?: number }) =>
+  generate: (data: { prompt: string; size?: string; style?: string; count?: number; presetId?: number; watermark?: boolean }) =>
     api.post<ImageAsset[]>('/images/generate', data),
   update: (id: number, patch: Partial<ImageAsset>) => api.put<ImageAsset>(`/images/${id}`, patch),
   remove: (id: number) => api.delete<{ removed: boolean }>(`/images/${id}`),

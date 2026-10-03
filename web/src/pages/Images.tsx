@@ -20,6 +20,7 @@ import {
   Image as AntImage,
   Divider,
   Pagination,
+  Switch,
 } from 'antd';
 import {
   InboxOutlined,
@@ -36,6 +37,7 @@ import { imageApi } from '@/api';
 import HintTip from '@/components/HintTip';
 import type { ImageAsset, ImageStylePreset } from '@smg/shared';
 import { IMAGE_SOURCES, IMAGE_SIZE_OPTIONS } from '@smg/shared';
+import { useConfigStore } from '@/store/config';
 
 const { TextArea } = Input;
 
@@ -55,6 +57,7 @@ function formatSize(bytes: number) {
 
 export default function ImageLibraryPage() {
   const { message } = AntApp.useApp();
+  const imgWatermarkDefault = useConfigStore((s) => s.config?.imgApi.watermark ?? false);
 
   const [items, setItems] = useState<ImageAsset[]>([]);
   const [total, setTotal] = useState(0);
@@ -158,6 +161,7 @@ export default function ImageLibraryPage() {
         style: v.style,
         count: v.count,
         presetId: v.presetId,
+        watermark: v.watermark,
       });
       message.success(`已生成 ${out.length} 张`);
       setGenOpen(false);
@@ -225,7 +229,10 @@ export default function ImageLibraryPage() {
           <Button icon={<LinkOutlined />} onClick={() => setImportOpen(true)}>
             外链导入
           </Button>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => setGenOpen(true)}>
+          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => {
+            genForm.setFieldsValue({ watermark: imgWatermarkDefault });
+            setGenOpen(true);
+          }}>
             AI 生成
           </Button>
         </Space>
@@ -456,7 +463,7 @@ export default function ImageLibraryPage() {
           模型配置
           <HintTip title="需在【系统设置 → 图片生成】中配置 OpenAI 兼容网关或阿里万相。" />
         </div>
-        <Form form={genForm} layout="vertical" initialValues={{ size: '1024x1024', count: 1 }}>
+        <Form form={genForm} layout="vertical" initialValues={{ size: '1024x1024', count: 1, watermark: false }}>
           <Form.Item
             name="presetId"
             label={
@@ -492,6 +499,18 @@ export default function ImageLibraryPage() {
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item
+            name="watermark"
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                生成水印
+                <HintTip title="默认跟随【系统设置 → 图片生成】。Seedream 等模型不传此参数时服务商会自动加水印。" />
+              </span>
+            }
+            valuePropName="checked"
+          >
+            <Switch checkedChildren="加水印" unCheckedChildren="无水印" />
+          </Form.Item>
         </Form>
       </Modal>
 

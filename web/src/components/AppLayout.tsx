@@ -10,6 +10,8 @@ import {
   PictureOutlined,
   SettingOutlined,
   MenuOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   ClearOutlined,
   WifiOutlined,
   DisconnectOutlined,
@@ -140,18 +142,44 @@ export default function AppLayout() {
           collapsible
           collapsed={collapsed}
           onCollapse={setCollapsed}
-          className="border-r border-line"
+          trigger={null}
+          className="border-r border-line !bg-white"
           style={{ overflow: 'auto' }}
         >
           <div
             className={[
               'flex h-14 items-center border-b border-line transition-all duration-200',
-              collapsed ? 'justify-center px-0' : 'gap-2.5 px-5',
+              collapsed ? 'flex-col justify-center gap-0.5 py-1' : 'justify-between gap-2 px-3',
             ].join(' ')}
           >
-            <BrandMark className="h-8 w-8" />
-            {!collapsed && (
-              <span className="truncate text-base font-semibold tracking-tight text-ink-900">智媒工坊</span>
+            {collapsed ? (
+              <Tooltip title="展开导航" placement="right">
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label="展开导航"
+                  className="!flex h-9 w-9 items-center justify-center !text-ink-500 hover:!bg-surface-sunken hover:!text-ink-800"
+                  icon={<MenuUnfoldOutlined className="text-base" />}
+                  onClick={() => setCollapsed(false)}
+                />
+              </Tooltip>
+            ) : (
+              <>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <BrandMark className="h-8 w-8 shrink-0" />
+                  <span className="truncate text-base font-semibold tracking-tight text-ink-900">智媒工坊</span>
+                </div>
+                <Tooltip title="收起导航" placement="right">
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="收起导航"
+                    className="!flex h-8 w-8 shrink-0 items-center justify-center !text-ink-500 hover:!bg-surface-sunken hover:!text-ink-800"
+                    icon={<MenuFoldOutlined />}
+                    onClick={() => setCollapsed(true)}
+                  />
+                </Tooltip>
+              </>
             )}
           </div>
           {menuContent}

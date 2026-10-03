@@ -102,7 +102,7 @@ class ImageService {
 
   /* ---------------- AI 生成 ---------------- */
 
-  async generate(prompt: string, opts: { size?: string; style?: string; count?: number } = {}) {
+  async generate(prompt: string, opts: { size?: string; style?: string; count?: number; watermark?: boolean } = {}) {
     const cfg = configService.get().imgApi;
     if (cfg.type === 'none') throw new Error('图片生成已关闭，请在【系统设置 → 图片生成】中配置');
     if ((cfg.type === 'openai' || cfg.type === 'ali') && !cfg.apiKey?.trim()) {
@@ -114,11 +114,12 @@ class ImageService {
 
     const [w, h] = parseSize(opts.size ?? cfg.size);
     const count = Math.min(4, Math.max(1, opts.count ?? 1));
+    const watermark = opts.watermark ?? cfg.watermark ?? false;
     const created: ImageAsset[] = [];
 
     for (let i = 0; i < count; i++) {
       try {
-        const buf = await this.renderOne(prompt, cfg, w, h, i);
+        const buf = await this.renderOne(prompt, cfg, w, h, i, watermark);
         created.push(
           await this.saveFile(buf, {
             title: prompt.slice(0, 40),
@@ -144,7 +145,7 @@ class ImageService {
     const cfg = configService.get().imgApi;
     const size = cfg.size?.includes('1792') || cfg.size?.includes('900') ? cfg.size : '1792x1024';
     const [w, h] = parseSize(size);
-    const raw = await this.renderOne(prompt, cfg, w, h, 0);
+    const raw = await this.renderOne(prompt, cfg, w, h, 0, cfg.watermark ?? false);
     const cropped = await sharp(raw, { failOn: 'none' })
       .resize(900, 384, { fit: 'cover', position: 'centre' })
       .jpeg({ quality: 92 })
@@ -165,6 +166,7 @@ class ImageService {
     w: number,
     h: number,
     seed: number,
+    watermark: boolean,
   ): Promise<Buffer> {
     const full = `${prompt}${seed ? ` #${seed}` : ''}`;
     const type = cfg.type;
@@ -172,7 +174,7 @@ class ImageService {
     const model = cfg.model;
 
     if (type === 'openai') {
-      return this.renderOpenAiCompatible(full, cfg.apiBase || '', apiKey, model, w, h);
+      return this.renderOpenAiCompatible(full, cfg.apiBase || '', apiKey, model, w, h, watermark);
     }
 
     if (type === 'ali' && apiKey) {
@@ -182,7 +184,7 @@ class ImageService {
         body: JSON.stringify({
           model: model || 'wanx2.0-t2i-turbo',
           input: { prompt: full, negative_prompt: '低质量、畸形、多余肢体、文字水印' },
-          parameters: { size: `${w}*${h}`, n: 1 },
+          parameters: { size: `${w}*${h}`, n: 1, watermark },
         }),
         signal: AbortSignal.timeout(120_000),
       });
@@ -194,7 +196,7 @@ class ImageService {
 
     if (type === 'pollinations') {
       return downloadBinary(
-        `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=${w}&height=${h}&nologo=true&seed=${seed}`,
+        `https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=${w}&height=${h}&nologo=${watermark ? 'false' : 'true'}&seed=${seed}`,
         { timeoutMs: 60_000 },
       );
     }
@@ -213,6 +215,7 @@ class ImageService {
     model: string,
     w: number,
     h: number,
+    watermark: boolean,
   ): Promise<Buffer> {
     let base = (apiBase || '').trim().replace(/\/+$/, '');
     if (!base) throw new Error('未配置图片接口地址');
@@ -235,6 +238,7 @@ class ImageService {
         prompt,
         n: 1,
         size,
+        watermark,
       }),
       signal: AbortSignal.timeout(120_000),
     });

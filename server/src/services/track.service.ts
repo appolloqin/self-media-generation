@@ -9,15 +9,38 @@ const TRACK_COLS = `id, name, slug, description, audience, boundary, structure, 
 const TPL_COLS = `id, track_id AS trackId, name, audience, depth, platform, style, strategy,
   word_min AS wordMin, word_max AS wordMax, enabled, created_at AS createdAt, updated_at AS updatedAt`;
 
+/** SQLite stores default_params as TEXT; normalize to object for API consumers. */
+function parseDefaultParams(raw: unknown): Record<string, unknown> {
+  if (raw == null || raw === '') return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore malformed JSON */
+    }
+  }
+  return {};
+}
+
+function hydrateTrack(row: ExpertTrack | undefined | null): ExpertTrack | undefined {
+  if (!row) return undefined;
+  return { ...row, defaultParams: parseDefaultParams(row.defaultParams) };
+}
+
 class TrackService {
   list(onlyEnabled = false): ExpertTrack[] {
-    return onlyEnabled
+    const rows = onlyEnabled
       ? query<ExpertTrack>(`SELECT ${TRACK_COLS} FROM expert_tracks WHERE enabled = 1 ORDER BY id`)
       : query<ExpertTrack>(`SELECT ${TRACK_COLS} FROM expert_tracks ORDER BY id`);
+    return rows.map((r) => hydrateTrack(r)!);
   }
 
   get(id: number): ExpertTrack | undefined {
-    return queryOne<ExpertTrack>(`SELECT ${TRACK_COLS} FROM expert_tracks WHERE id = ?`, [id]);
+    return hydrateTrack(queryOne<ExpertTrack>(`SELECT ${TRACK_COLS} FROM expert_tracks WHERE id = ?`, [id]));
   }
 
   create(data: Partial<ExpertTrack> & { name: string }): ExpertTrack {

@@ -446,7 +446,7 @@ function ContentPanel() {
             <Form.Item label="模板分类">
               <Select
                 allowClear
-                placeholder="不限（随机选择）"
+                placeholder="不限（按选题匹配分类）"
                 value={config.templateCategory || undefined}
                 onChange={(v) => patch({ templateCategory: v ?? '' })}
                 options={(config.templateCategories ?? []).map((c) => ({ value: c.name, label: categoryLabel(c.name) }))}
