@@ -1,0 +1,22 @@
+version: '3.9'
+
+# 单镜像：前端 + API + SQLite，访问 http://localhost:5178/
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: self-media-generation:local
+    restart: always
+    environment:
+      PORT: 5178
+      HOST: 0.0.0.0
+      NODE_ENV: production
+      SMG_DATA_DIR: /app/data
+    ports:
+      - '5178:5178'
+    volumes:
+      - smg_data:/app/data
+
+volumes:
+  smg_data:

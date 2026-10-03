@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>设置远程控制台地址</title>
+    <style>
+      body { font-family: 'Microsoft YaHei', -apple-system, sans-serif; padding: 20px; margin: 0; }
+      label { font-size: 13px; color: #374151; }
+      input { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+      .row { margin-top: 18px; text-align: right; }
+      button { padding: 6px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+      .primary { background: #3a7bd5; color: #fff; }
+      .ghost { background: #f0f0f0; color: #333; margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <label for="url">远程控制台地址（例如 https://smg.example.com）</label>
+    <input id="url" type="text" placeholder="https://..." />
+    <div class="row">
+      <button class="ghost" id="cancel">取消</button>
+      <button class="primary" id="ok">确定</button>
+    </div>
+    <script>
+      const { ipcRenderer } = require('electron')
+      const params = new URLSearchParams(location.search)
+      const input = document.getElementById('url')
+      input.value = params.get('value') || ''
+      input.focus()
+      const submit = (v) => ipcRenderer.send('prompt-result', v)
+      document.getElementById('ok').onclick = () => submit(input.value)
+      document.getElementById('cancel').onclick = () => submit(null)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submit(input.value)
+        if (e.key === 'Escape') submit(null)
+      })
+    </script>
+  </body>
+</html>

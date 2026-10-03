@@ -1,0 +1,15 @@
+runtime/
+.cache/
+release/
+node_modules/
+*.log
+# rcedit / electron 探测产物（体积可达 ~190MB，禁止入库）
+.rc-probe.exe
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.blockmap
+*.snap
+*.msi
+*.AppImage.*

@@ -1,0 +1,86 @@
+{
+  "name": "smg-desktop",
+  "version": "1.0.0",
+  "description": "智媒工坊桌面端 — 本地一体化运行时或远程控制台",
+  "homepage": "https://github.com/appolloqin/self-media-generation",
+  "author": "智媒工坊",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "dev": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win --x64",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.smg.workshop",
+    "productName": "SMGWorkshop",
+    "copyright": "Copyright © 2026 智媒工坊",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime",
+        "to": "runtime"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "smg-workshop-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "智媒工坊",
+      "artifactName": "smg-workshop-setup-${version}.${ext}",
+      "include": "build/installer.nsh"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "smg-workshop-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "maintainer": "智媒工坊 <dev@smg.local>",
+      "vendor": "智媒工坊",
+      "synopsis": "AI 自媒体内容创作平台桌面端",
+      "artifactName": "smg-workshop-${version}-linux-${arch}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "35.5.1",
+    "electron-builder": "25.1.8"
+  }
+}

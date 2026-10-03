@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@smg/shared": ["../shared/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "build.mjs"]
+}

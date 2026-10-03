@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>智媒工坊 · 启动失败</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex; align-items: center; justify-content: center;
+        font-family: 'Microsoft YaHei', -apple-system, sans-serif; background: #f5f6f8; color: #1f2937;
+      }
+      .card { width: 560px; background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      pre { background: #fff1f0; color: #a8071a; padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+      .hint { color: #6b7280; font-size: 13px; line-height: 1.7; }
+      button {
+        margin-top: 16px; margin-right: 8px; padding: 8px 18px; border: none; border-radius: 6px;
+        background: #3a7bd5; color: #fff; cursor: pointer; font-size: 14px;
+      }
+      button.ghost { background: #f0f0f0; color: #333; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>本地服务启动失败</h1>
+      <pre id="msg"></pre>
+      <div class="hint">
+        可尝试：<br />
+        1. 确认已执行 <code>npm run desktop:prepare</code> 生成运行时；<br />
+        2. 端口被占用时可关闭冲突程序后重试；<br />
+        3. 若提示原生模块 ABI 不匹配，请删除 <code>desktop/runtime/server/node_modules</code> 后重新执行 <code>npm run desktop:prepare</code>。
+      </div>
+      <button id="retry">重试</button>
+      <button id="datadir" class="ghost">打开数据目录</button>
+    </div>
+    <script>
+      const params = new URLSearchParams(location.search)
+      document.getElementById('msg').textContent = params.get('message') || '未知错误'
+      document.getElementById('retry').onclick = () => window.smg?.retry()
+      document.getElementById('datadir').onclick = () => window.smg?.openDataDir()
+    </script>
+  </body>
+</html>

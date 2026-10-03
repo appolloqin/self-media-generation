@@ -1,0 +1,38 @@
+{
+  "name": "self-media-generation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "智媒工坊-AI自媒体内容创作平台（TypeScript + React + Node + SQLite）",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w server && npm run build -w web",
+    "build:server": "npm run build -w server",
+    "build:web": "npm run build -w web",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "db:reset": "npm run db:reset -w server",
+    "test:auth": "node scripts/test-auth.mjs",
+    "test:provider": "node scripts/test-provider.mjs",
+    "test:endpoint": "node scripts/test-endpoint.mjs",
+    "test:e2e-openai": "node scripts/test-e2e-openai.mjs",
+    "mock:openai": "node scripts/mock-openai.mjs",
+    "setup": "npm install && npm run db:seed -w server",
+    "desktop:install": "cd desktop && npm install",
+    "desktop:prepare": "node desktop/scripts/prepare-runtime.mjs",
+    "desktop:dev": "cd desktop && npm run dev",
+    "desktop:dist": "cd desktop && npm run dist",
+    "desktop:dist:win": "cd desktop && npm run dist:win",
+    "desktop:dist:mac": "cd desktop && npm run dist:mac",
+    "desktop:dist:linux": "cd desktop && npm run dist:linux"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}

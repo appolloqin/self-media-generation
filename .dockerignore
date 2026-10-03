@@ -1,0 +1,16 @@
+.git
+.github
+.cursor
+node_modules
+**/node_modules
+data
+desktop
+docs
+images
+*.md
+web/dist
+server/dist
+**/.vite
+**/tsconfig.tsbuildinfo
+.gitignore
+.dockerignore

@@ -1,0 +1,40 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+data/
+# 仅忽略运行时数据库目录，勿用裸 `db/`（会误伤 server/src/db 源码）
+/db/
+data/db/
+*.db
+*.db-shm
+*.db-wal
+uploads/
+.DS_Store
+*.log
+*.tsbuildinfo
+.cursor/
+docs/
+
+# desktop（与 desktop/.gitignore 对齐，根级再兜一层）
+desktop/runtime/
+desktop/release/
+desktop/.cache/
+desktop/node_modules/
+desktop/.rc-probe.exe
+desktop/*.exe
+desktop/*.dmg
+desktop/*.AppImage
+desktop/*.deb
+desktop/*.blockmap
+desktop/*.msi
+
+# build outputs
+server/dist/
+web/dist/
+web/node_modules/
+server/node_modules/
+shared/node_modules/
