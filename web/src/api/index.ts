@@ -202,11 +202,14 @@ export const articleApi = {
 
 /* ---------------- 生成 ---------------- */
 
+export type PolishPreset = 'colloquial' | 'professional' | 'condense' | 'custom';
+
 export type GeneratePayload = {
   topic: string;
   platform?: PublishPlatform;
-  mode?: 'hot' | 'custom' | 'reference';
+  mode?: 'hot' | 'custom' | 'reference' | 'polish';
   reference?: { templateCategory?: string; templateName?: string; urls?: string[]; ratio?: number };
+  polish?: { content: string; preset?: PolishPreset; instruction?: string };
   dimensions?: SelectedDimension[];
   trackId?: number;
   trackTemplateId?: number;
@@ -214,16 +217,45 @@ export type GeneratePayload = {
   autoPublish?: boolean;
 };
 
+export type GenerateLiveLog = {
+  seq: number;
+  type: 'info' | 'success' | 'warning' | 'error' | 'status' | 'internal';
+  message: string;
+  timestamp: number;
+};
+
+export type GenerateLiveState = {
+  running: boolean;
+  task: {
+    id: number;
+    stage: string;
+    progress: number;
+    status: string;
+    articleId: number | null;
+    topic: string;
+  } | null;
+  logs: GenerateLiveLog[];
+  logSeq: number;
+};
+
 export const generateApi = {
   run: (payload: GeneratePayload) =>
     api.post<{ task: TaskRecord; article: Article | null }>('/generate', payload),
   stop: () => api.post<{ stopping: boolean }>('/generate/stop'),
   status: () => api.get<{ running: boolean }>('/generate/status'),
+  /** WS 不可用时轮询此接口同步进度与日志 */
+  live: (since = 0) => api.get<GenerateLiveState>('/generate/live', { since }),
 };
 
 export const deAiApi = {
   analyze: (content: string, config?: Record<string, unknown>, reference?: string) =>
     api.post<{ before: AiFlavorDetail; after: DeAiResultType }>('/deai/analyze', { content, config, reference }),
+};
+
+/** 纯改写（不落库）；工作台润色请走 generateApi.run({ mode: 'polish' }) */
+export const polishApi = {
+  rewrite: (data: { content: string; instruction?: string; preset?: PolishPreset }) =>
+    api.post<{ content: string; instruction: string }>('/polish', data),
 };
 
 export type AiFlavorDetail = {

@@ -91,7 +91,7 @@ export default function HotRadarPage() {
     const current = useConfigStore.getState().config;
     void patchConfig({ publishPlatform: current?.publishPlatform ?? 'wechat' });
     // 通过路由 state 直传选题，工作台自动切到「手动指定选题」并回填
-    navigate('/', { state: { topic, mode: 'custom' } });
+    navigate('/', { state: { topic, mode: 'custom', nonce: Date.now() } });
   };
 
   return (

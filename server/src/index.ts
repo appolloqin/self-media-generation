@@ -8,6 +8,7 @@ import { APP_INFO, ENV, PATHS } from './config/env.js';
 import { runMigrations, syncBuiltinResources } from './db/migrate.js';
 import { runSeed } from './db/seed.js';
 import { initWs, broadcast, getClientCount, setWsAuthEnabled, setWsTokenVerifier } from './core/ws.js';
+import { pushBufferedLog } from './core/logBuffer.js';
 import { logger } from './core/logger.js';
 import { errorHandler, ok } from './api/helpers.js';
 import { queryOne } from './db/connection.js';
@@ -135,6 +136,7 @@ app.use(errorHandler);
 /* ---------------- 日志转发到前端 ---------------- */
 
 logger.on('log', (entry) => {
+  pushBufferedLog(entry);
   broadcast({ type: 'log', level: entry.type, message: entry.message, timestamp: entry.timestamp });
 });
 

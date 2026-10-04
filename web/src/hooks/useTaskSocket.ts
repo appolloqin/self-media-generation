@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { create } from 'zustand';
-import type { LogEntry, TaskStatus, WsMessage } from '@smg/shared';
+import { WORKFLOW_STAGES, type LogEntry, type TaskStatus, type WsMessage } from '@smg/shared';
 import { getToken } from '@/api/client';
+import { generateApi } from '@/api';
 
 export type ProgressState = {
   stage: string;
@@ -34,6 +35,19 @@ type TaskState = {
 
 const MAX_LOGS = 500;
 
+/** 跨组件重挂载去重（Strict Mode / 再进工作台不应重复弹窗） */
+let handledCompleteKey = '';
+let handledFailKey = '';
+
+export function completionEventKey(taskId: number | null, articleId: number | null, message: string): string {
+  return `c:${taskId ?? 0}:${articleId ?? 0}:${message}`;
+}
+
+export function consumeEventKey(prev: string, next: string): { handled: boolean; key: string } {
+  if (!next || prev === next) return { handled: false, key: prev };
+  return { handled: true, key: next };
+}
+
 export const useTaskStore = create<TaskState>((set) => ({
   connected: false,
   running: false,
@@ -49,29 +63,43 @@ export const useTaskStore = create<TaskState>((set) => ({
   setRunning: (v) => set({ running: v }),
   setProgress: (p) => set({ progress: p }),
   setStatus: (status, taskId) =>
-    set({ status, taskId, running: status === 'running' }),
+    set((s) => {
+      // 服务端在 completed/failed 后会再推 idle；不可盖掉终态，否则 useTaskEvents 收不到完成回调、按钮一直 loading
+      if (status === 'idle' && (s.status === 'completed' || s.status === 'failed')) {
+        return { running: false, taskId: null };
+      }
+      return { status, taskId, running: status === 'running' };
+    }),
   pushLog: (entry) =>
     set((s) => ({ logs: [...s.logs, entry].slice(-MAX_LOGS) })),
   clearLogs: () => set({ logs: [] }),
   complete: (taskId, articleId, message) =>
-    set({
-      taskId,
-      lastArticleId: articleId,
-      lastMessage: message,
-      status: 'completed',
-      running: false,
-      progress: { stage: 'done', progress: 100, message },
+    set((s) => {
+      if (s.status === 'completed' && s.lastArticleId === articleId && s.lastMessage === message) return s;
+      return {
+        taskId,
+        lastArticleId: articleId,
+        lastMessage: message,
+        status: 'completed',
+        running: false,
+        progress: { stage: 'done', progress: 100, message },
+      };
     }),
   fail: (taskId, error) =>
-    set({
-      taskId,
-      error,
-      status: 'failed',
-      running: false,
-      progress: { stage: 'failed', progress: 100, message: error },
+    set((s) => {
+      if (s.status === 'failed' && s.error === error) return s;
+      return {
+        taskId,
+        error,
+        status: 'failed',
+        running: false,
+        progress: { stage: 'failed', progress: 100, message: error },
+      };
     }),
   setError: (error) => set({ error }),
-  reset: () =>
+  reset: () => {
+    handledCompleteKey = '';
+    handledFailKey = '';
     set({
       error: null,
       lastMessage: '',
@@ -80,7 +108,8 @@ export const useTaskStore = create<TaskState>((set) => ({
       status: 'idle',
       running: false,
       taskId: null,
-    }),
+    });
+  },
 }));
 
 let socket: WebSocket | null = null;
@@ -185,7 +214,7 @@ function handleMessage(msg: WsMessage): void {
   const store = useTaskStore.getState();
   switch (msg.type) {
     case 'log':
-      store.pushLog({ type: msg.level ?? 'info', message: msg.message, timestamp: msg.timestamp });
+      pushLogSafe({ type: msg.level ?? 'info', message: msg.message, timestamp: msg.timestamp });
       break;
     case 'progress':
       store.setProgress({ stage: msg.stage, progress: msg.progress, message: msg.message });
@@ -204,7 +233,7 @@ function handleMessage(msg: WsMessage): void {
   }
 }
 
-/** 订阅任务完成 / 失败事件（每次状态变化触发一次回调） */
+/** 订阅任务完成 / 失败事件（同一完成只提示一次） */
 export function useTaskEvents(handlers: {
   onCompleted?: (articleId: number | null, message: string) => void;
   onFailed?: (error: string) => void;
@@ -213,17 +242,95 @@ export function useTaskEvents(handlers: {
   ref.current = handlers;
 
   const status = useTaskStore((s) => s.status);
+  const taskId = useTaskStore((s) => s.taskId);
   const lastArticleId = useTaskStore((s) => s.lastArticleId);
   const lastMessage = useTaskStore((s) => s.lastMessage);
   const error = useTaskStore((s) => s.error);
 
   useEffect(() => {
-    if (status === 'completed') ref.current.onCompleted?.(lastArticleId, lastMessage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, lastArticleId]);
+    if (status !== 'completed') return;
+    const next = completionEventKey(taskId, lastArticleId, lastMessage);
+    const hit = consumeEventKey(handledCompleteKey, next);
+    if (!hit.handled) return;
+    handledCompleteKey = hit.key;
+    ref.current.onCompleted?.(lastArticleId, lastMessage);
+  }, [status, taskId, lastArticleId, lastMessage]);
 
   useEffect(() => {
-    if (status === 'failed' && error) ref.current.onFailed?.(error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, error]);
+    if (status !== 'failed' || !error) return;
+    const next = `f:${taskId ?? 0}:${error}`;
+    const hit = consumeEventKey(handledFailKey, next);
+    if (!hit.handled) return;
+    handledFailKey = hit.key;
+    ref.current.onFailed?.(error);
+  }, [status, taskId, error]);
+}
+
+/* ---------------- HTTP 轮询（WS 代理失败时的进度/日志兜底） ---------------- */
+
+let livePollTimer: ReturnType<typeof setInterval> | null = null;
+let liveLogSeq = 0;
+const seenLogKeys = new Set<string>();
+
+function logKey(message: string, timestamp: number): string {
+  return `${timestamp}|${message}`;
+}
+
+function pushLogSafe(entry: LogEntry): void {
+  const key = logKey(entry.message, entry.timestamp);
+  if (seenLogKeys.has(key)) return;
+  seenLogKeys.add(key);
+  if (seenLogKeys.size > 800) {
+    const drop = [...seenLogKeys].slice(0, 400);
+    for (const k of drop) seenLogKeys.delete(k);
+  }
+  useTaskStore.getState().pushLog(entry);
+}
+
+async function pullGenerateLive(): Promise<void> {
+  try {
+    const live = await generateApi.live(liveLogSeq);
+    liveLogSeq = live.logSeq;
+    const store = useTaskStore.getState();
+
+    if (live.task && (live.running || store.status === 'running')) {
+      const label = WORKFLOW_STAGES.find((s) => s.key === live.task!.stage)?.label ?? live.task.stage;
+      store.setStatus('running', live.task.id);
+      store.setProgress({
+        stage: live.task.stage,
+        progress: live.task.progress,
+        message: label,
+      });
+    }
+
+    for (const log of live.logs) {
+      pushLogSafe({ type: log.type, message: log.message, timestamp: log.timestamp });
+    }
+  } catch {
+    /* 轮询失败时忽略，下次再试 */
+  }
+}
+
+/** 开始 HTTP 轮询联动执行状态与日志 */
+export function startTaskLivePoll(): void {
+  stopTaskLivePoll();
+  liveLogSeq = 0;
+  seenLogKeys.clear();
+  void pullGenerateLive();
+  livePollTimer = setInterval(() => {
+    void pullGenerateLive();
+  }, 500);
+}
+
+export function stopTaskLivePoll(): void {
+  if (livePollTimer) {
+    clearInterval(livePollTimer);
+    livePollTimer = null;
+  }
+}
+
+/** 结束时再拉一次，避免尾部日志丢失 */
+export async function flushTaskLivePoll(): Promise<void> {
+  await pullGenerateLive();
+  stopTaskLivePoll();
 }

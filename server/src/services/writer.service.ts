@@ -12,7 +12,8 @@ import { templateService } from './template.service.js';
 import { layoutService } from './layout.service.js';
 import { articleService } from './article.service.js';
 import { publishService } from './publish.service.js';
-import { countWords, extractSummary, removeCodeBlocks } from '../utils/content.js';
+import { countWords, extractSummary, extractTitle, removeCodeBlocks } from '../utils/content.js';
+import { polishService } from './polish.service.js';
 import type {
   Article,
   ArticleFormat,
@@ -69,6 +70,13 @@ class WriterService {
     return this.running.size > 0;
   }
 
+  /** 当前执行中的任务（供 HTTP 轮询联动进度） */
+  getActiveTask(): TaskRecord | null {
+    const id = this.running.keys().next().value as number | undefined;
+    if (id == null) return null;
+    return getTask(id);
+  }
+
   stopAll(): void {
     for (const ctl of this.running.values()) ctl.stop = true;
   }
@@ -78,11 +86,17 @@ class WriterService {
   async generate(request: GenerateRequest): Promise<WorkflowResult> {
     const cfg = configService.get();
     const startedAt = Date.now();
+    const mode = request.mode ?? 'custom';
 
     const res = run(
       `INSERT INTO tasks (topic, platform, status, stage, progress)
        VALUES (?,?,?,?,0)`,
-      [request.topic || '自动选题', request.platform ?? cfg.publishPlatform, 'running', 'init'],
+      [
+        request.topic?.trim() || (mode === 'polish' ? '文章润色' : '自动选题'),
+        request.platform ?? cfg.publishPlatform,
+        'running',
+        'init',
+      ],
     );
     const taskId = Number(res.lastInsertRowid);
     const ctl = { stop: false };
@@ -94,9 +108,17 @@ class WriterService {
     try {
       /* ---- 阶段 1：确定选题 ---- */
       report('init');
-      const mode = request.mode ?? 'custom';
       let topic = (request.topic ?? '').trim();
-      if (mode === 'hot' || (!topic && mode !== 'reference')) {
+
+      if (mode === 'polish') {
+        if (!request.polish?.content?.trim()) throw new Error('请粘贴原文');
+        if (request.polish.preset === 'custom' && !request.polish.instruction?.trim()) {
+          throw new Error('自定义模式请填写润色提示词');
+        }
+      }
+
+      // polish / reference：空 topic 不触发热榜选题
+      if (mode === 'hot' || (!topic && mode !== 'reference' && mode !== 'polish')) {
         const picked = await hotNewsService.pickTopic();
         topic = topic || picked.topic;
         report('init', `选题来源：${picked.platform} 热榜`);
@@ -105,33 +127,48 @@ class WriterService {
 
       /* ---- 阶段 2：热点信息增强 ---- */
       let context = '';
-      report('hot');
-      if (mode === 'hot') {
-        const horses = await this.enrichByHot(topic);
-        if (horses) context += horses;
+      if (mode === 'polish') {
+        report('hot', '润色模式：跳过热点');
+      } else {
+        report('hot');
+        if (mode === 'hot') {
+          const horses = await this.enrichByHot(topic);
+          if (horses) context += horses;
+        }
       }
 
       /* ---- 阶段 3：联网搜索 / 参考素材 ---- */
-      report('search');
-      const pack = await this.loadReferences(request, topic, mode);
-      if (mode === 'reference' && !topic) {
-        topic = pack.titles[0]?.trim() || '参考文章仿写';
+      let pack: ReferencePack = { materials: '', urls: [], titles: [] };
+      if (mode === 'polish') {
+        report('search', '润色模式：跳过搜索/参考');
+      } else {
+        report('search');
+        pack = await this.loadReferences(request, topic, mode);
+        if (mode === 'reference' && !topic) {
+          topic = pack.titles[0]?.trim() || '参考文章仿写';
+        }
+        if (!topic) throw new Error('请填写选题，或在仿写模式下提供可抓取的参考链接');
+        report('init', `平台：${platform}，主题：${topic}`);
+        if (pack.materials) context += `\n${pack.materials}`;
+        if (mode === 'reference' && !pack.materials) {
+          throw new Error('参考文章抓取失败，请确认链接可访问后再试');
+        }
       }
-      if (!topic) throw new Error('请填写选题，或在仿写模式下提供可抓取的参考链接');
-      report('init', `平台：${platform}，主题：${topic}`);
-      if (pack.materials) context += `\n${pack.materials}`;
-      if (mode === 'reference' && !pack.materials) {
-        throw new Error('参考文章抓取失败，请确认链接可访问后再试');
+
+      if (mode === 'polish') {
+        report('init', `平台：${platform}，润色原文 ${request.polish!.content.trim().length} 字`);
       }
 
       /* ---- 阶段 4：专家赛道与维度 ---- */
-      const track = request.trackId ? this.getTrack(request.trackId) : null;
-      const trackTemplate = request.trackTemplateId ? this.getTrackTemplate(request.trackTemplateId) : null;
+      const track = mode === 'polish' ? null : request.trackId ? this.getTrack(request.trackId) : null;
+      const trackTemplate =
+        mode === 'polish' ? null : request.trackTemplateId ? this.getTrackTemplate(request.trackTemplateId) : null;
       const userDimensions = (request.dimensions ?? []).length > 0;
       let dimensions: SelectedDimension[] = request.dimensions ?? [];
-      // 仿写默认不套随机场景维度，否则会把测评稿改成「古老图书馆」之类文学壳
+      // 仿写/润色默认不套随机场景维度，否则会把稿子改成「古老图书馆」之类文学壳
       if (
         mode !== 'reference' &&
+        mode !== 'polish' &&
         cfg.dimensionalCreative.enabled &&
         !userDimensions &&
         cfg.dimensionalCreative.autoDimensionSelection
@@ -142,23 +179,52 @@ class WriterService {
         }
       }
 
-      /* ---- 阶段 5：AI 写作 ---- */
+      /* ---- 阶段 5：AI 写作 / 润色 ---- */
       report('writing');
-      const draft = await this.writeArticle({
-        topic,
-        platform,
-        context,
-        mode,
-        track,
-        trackTemplate,
-        dimensions: mode === 'reference' && !userDimensions ? [] : dimensions,
-        ctl,
-        report,
-      });
+      let draft: ContentResult;
+      if (mode === 'polish') {
+        const extra = request.polish?.instruction?.trim();
+        if (extra) report('writing', `附加提示词：${extra.slice(0, 120)}${extra.length > 120 ? '…' : ''}`);
+        const rewritten = await polishService.rewrite({
+          content: request.polish!.content,
+          instruction: request.polish!.instruction,
+          preset: request.polish!.preset,
+        });
+        const mdTitle = rewritten.content.match(/^\s*#\s+(.+)$/m)?.[1]?.trim();
+        const body = rewritten.content.replace(/^\s*#\s+.+\n+/, '').trim();
+        const title = topic || mdTitle || extractTitle(body || rewritten.content, '润色稿').slice(0, 60);
+        topic = title;
+        const finalContent = body || rewritten.content;
+        draft = {
+          title,
+          content: finalContent,
+          summary: extractSummary(finalContent),
+          format: cfg.articleFormat,
+          wordCount: countWords(finalContent),
+          metadata: {
+            polish: { preset: request.polish?.preset, instruction: rewritten.instruction },
+          },
+        };
+        run('UPDATE tasks SET topic = ? WHERE id = ?', [topic, taskId]);
+        report('writing', `润色完成：《${title}》`);
+      } else {
+        draft = await this.writeArticle({
+          topic,
+          platform,
+          context,
+          mode,
+          track,
+          trackTemplate,
+          dimensions: mode === 'reference' && !userDimensions ? [] : dimensions,
+          ctl,
+          report,
+        });
+      }
       if (ctl.stop) throw new Error('任务已被手动停止');
 
       /* ---- 阶段 6：维度化创意 ---- */
-      const dimsForTransform = mode === 'reference' && !userDimensions ? [] : dimensions;
+      const dimsForTransform =
+        (mode === 'reference' || mode === 'polish') && !userDimensions ? [] : dimensions;
       if (cfg.dimensionalCreative.enabled && dimsForTransform.length) {
         report('creative');
         const transformed = await creativeService.transform(
@@ -171,11 +237,15 @@ class WriterService {
         if (transformed !== draft.content) {
           draft.content = transformed;
         }
+      } else if (mode === 'polish') {
+        report('creative', '未选择维度：跳过');
       }
 
       /* ---- 阶段 7：去 AI 味 ---- */
       const deAiCfg = { ...cfg.deAi, ...(request.deAi ?? {}) };
-      if (deAiCfg.enabled) {
+      if (mode === 'polish') {
+        report('deai', '润色模式：跳过二次去AI味，避免覆盖用户改写要求');
+      } else if (deAiCfg.enabled) {
         report('deai');
         const result = await deAiEngine.run(draft.content, {
           config: deAiCfg,
@@ -197,7 +267,14 @@ class WriterService {
       report('layout');
       let html = draft.content;
       const format: ArticleFormat = cfg.articleFormat;
-      if (format === 'html') {
+      let savedFormat: ArticleFormat = format;
+      if (mode === 'polish') {
+        // 润色成稿保持 Markdown，机型预览再渲染；不改其他模式的 HTML 排版
+        savedFormat = 'markdown';
+        html = draft.content;
+        draft.metadata.template = 'markdown';
+        report('layout', '润色模式：保留 Markdown，预览端渲染');
+      } else if (format === 'html') {
         if (cfg.useTemplate) {
           const tpl = templateService.pickTemplate({
             name: request.reference?.templateName,
@@ -226,11 +303,11 @@ class WriterService {
         content: html,
         topic,
         platform,
-        category: track?.name ?? '',
-        format,
+        category: mode === 'polish' ? '文章润色' : (track?.name ?? ''),
+        format: savedFormat,
         summary: draft.summary,
         source: 'ai',
-        trackId: request.trackId ?? null,
+        trackId: mode === 'polish' ? null : (request.trackId ?? null),
         sceneId: null,
         status: 'draft',
       });

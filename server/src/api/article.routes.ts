@@ -10,6 +10,7 @@ import { imageService } from '../services/image.service.js';
 import { writerService } from '../services/writer.service.js';
 import { layoutService } from '../services/layout.service.js';
 import { logger } from '../core/logger.js';
+import { logsSince } from '../core/logBuffer.js';
 import { PATHS } from '../config/env.js';
 import { countWords, extractSummary, markdownToHtml, textToHtml } from '../utils/content.js';
 import { ok, wrap, num, intParam, HttpError } from './helpers.js';
@@ -181,18 +182,27 @@ r.post(
   wrap(async (req, res) => {
     if (writerService.isRunning()) throw new HttpError('已有生成任务在执行，请等待完成或先停止', 409);
     const body = req.body as Record<string, any>;
-    if (!body.topic?.trim() && body.mode !== 'hot') {
+    if (!body.topic?.trim() && body.mode !== 'hot' && body.mode !== 'polish') {
       throw new HttpError('请填写选题，或选择「热点自动选题」模式');
+    }
+    if (body.mode === 'polish') {
+      if (!body.polish?.content?.trim()) throw new HttpError('请粘贴原文');
+      if (body.polish.preset === 'custom' && !body.polish.instruction?.trim()) {
+        throw new HttpError('自定义模式请填写润色提示词');
+      }
     }
     const platform = (body.platform ?? 'wechat') as PublishPlatform;
     if (!PUBLISH_PLATFORMS.includes(platform)) throw new HttpError(`不支持的平台：${platform}`);
 
-    logger.info(`启动生成任务：${body.topic || '（自动选题）'} → ${PLATFORM_LABELS[platform]}`);
+    logger.info(
+      `启动生成任务：${body.mode === 'polish' ? '（文章润色）' : body.topic || '（自动选题）'} → ${PLATFORM_LABELS[platform]}`,
+    );
     const result = await writerService.generate({
       topic: body.topic ?? '',
       platform,
       mode: body.mode ?? 'custom',
       reference: body.reference,
+      polish: body.polish,
       dimensions: body.dimensions,
       trackId: body.trackId ? num(body.trackId, 'trackId') : undefined,
       trackTemplateId: body.trackTemplateId ? num(body.trackTemplateId, 'trackTemplateId') : undefined,
@@ -216,6 +226,36 @@ r.get(
   wrap((_req, res) => ok(res, { running: writerService.isRunning() })),
 );
 
+/** HTTP 轮询：WS 不可用时也能驱动工作台进度/日志 */
+r.get(
+  '/generate/live',
+  wrap((req, res) => {
+    const since = Number((req.query as { since?: string }).since ?? 0) || 0;
+    const { logs, latestSeq } = logsSince(since);
+    const task = writerService.getActiveTask();
+    ok(res, {
+      running: writerService.isRunning(),
+      task: task
+        ? {
+            id: task.id,
+            stage: task.stage,
+            progress: task.progress,
+            status: task.status,
+            articleId: task.articleId,
+            topic: task.topic,
+          }
+        : null,
+      logs: logs.map((l) => ({
+        seq: l.seq,
+        type: l.type,
+        message: l.message,
+        timestamp: l.timestamp,
+      })),
+      logSeq: latestSeq,
+    });
+  }),
+);
+
 /* ---------------- 去 AI 味（独立调试） ---------------- */
 
 r.post(
@@ -231,6 +271,26 @@ r.post(
     const score = scoreAiFlavor(content);
     const result = await deAiEngine.run(content, { config, reference });
     ok(res, { before: score, after: result });
+  }),
+);
+
+/* ---------------- 文章润色（粘贴原文 + 提示词） ---------------- */
+
+r.post(
+  '/polish',
+  wrap(async (req, res) => {
+    const body = z
+      .object({
+        content: z.string().min(1, '请粘贴原文'),
+        instruction: z.string().optional(),
+        preset: z.enum(['colloquial', 'professional', 'condense', 'custom']).optional(),
+      })
+      .parse(req.body);
+    if (body.preset === 'custom' && !body.instruction?.trim()) {
+      throw new HttpError('自定义模式请填写润色提示词');
+    }
+    const { polishService } = await import('../services/polish.service.js');
+    ok(res, await polishService.rewrite(body));
   }),
 );
 

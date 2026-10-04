@@ -299,14 +299,21 @@ export type ArticlePublishRecord = {
 };
 
 export type GenerateRequest = {
+  /** polish 模式允许空字符串；writing 之后用正文标题回填 */
   topic: string;
   platform?: string;
-  mode?: 'hot' | 'custom' | 'reference';
+  mode?: 'hot' | 'custom' | 'reference' | 'polish';
   reference?: {
     templateCategory?: string;
     templateName?: string;
     urls?: string[];
     ratio?: number;
+  };
+  /** 文章润色：粘贴原文 + 预设/提示词 */
+  polish?: {
+    content: string;
+    preset?: 'colloquial' | 'professional' | 'condense' | 'custom';
+    instruction?: string;
   };
   dimensions?: SelectedDimension[];
   trackId?: number;

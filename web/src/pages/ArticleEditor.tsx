@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   Card,
   Tabs,
@@ -37,6 +37,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PLATFORM_LABELS, PUBLISH_PLATFORMS, platformLabel, countChineseWords } from '@smg/shared';
 import { articleApi, publishApi, layoutApi, deAiApi, imageApi, type ArticleDetail, type PublishOutcome } from '@/api';
 import type { PublishPlatform } from '@smg/shared';
+import DevicePreview from '@/components/DevicePreview';
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -94,6 +95,12 @@ export default function ArticleEditorPage() {
   }, []);
 
   const wordCount = useMemo(() => countChineseWords(content), [content]);
+
+  // 正文编辑与预览同源；排版按钮可临时改 previewHtml，一旦再改正文即重新跟随
+  const deferredContent = useDeferredValue(content);
+  useEffect(() => {
+    setPreviewHtml(deferredContent);
+  }, [deferredContent]);
 
   const handleSave = async () => {
     if (!articleId) return;
@@ -334,22 +341,17 @@ export default function ArticleEditorPage() {
                   </Space>
                 ),
                 children: (
-                  <Card
-                    size="small"
-                    extra={
-                      <Button size="small" icon={<CopyOutlined />} onClick={handleUsePreview}>
-                        应用到正文
-                      </Button>
-                    }
-                  >
-                    <div className="phone-frame" style={{ height: 620 }}>
-                      <iframe
-                        title="preview"
-                        srcDoc={buildPreviewDoc(previewHtml, title)}
-                        sandbox="allow-same-origin"
-                        style={{ width: '100%', height: '100%', border: 0 }}
-                      />
-                    </div>
+                  <Card size="small">
+                    <DevicePreview
+                      html={previewHtml}
+                      title={title}
+                      maxHeight={820}
+                      extra={
+                        <Button size="small" icon={<CopyOutlined />} onClick={handleUsePreview}>
+                          应用到正文
+                        </Button>
+                      }
+                    />
                   </Card>
                 ),
               },
@@ -495,25 +497,3 @@ export default function ArticleEditorPage() {
   );
 }
 
-function buildPreviewDoc(html: string, title: string): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-  body{margin:0;padding:16px;background:#fff;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;color:#3a3a3a;word-break:break-word}
-  img{max-width:100%;height:auto}
-  p{margin:0 0 16px;line-height:1.9;text-align:justify}
-  h1,h2,h3{line-height:1.5;margin:24px 0 12px}
-  section{margin:0 0 16px}
-  blockquote{border-left:4px solid #3a7bd5;padding-left:14px;margin:16px 0;color:#555;background:#f7faff}
-  pre{background:#f7f7f7;padding:12px;border-radius:6px;overflow-x:auto}
-  code{background:#f5f5f5;padding:2px 5px;border-radius:3px}
-  ul,ol{padding-left:24px;line-height:1.9}
-  table{width:100%;border-collapse:collapse;margin:16px 0}
-  td,th{border:1px solid #e5e5e5;padding:8px}
-</style></head><body>${html}</body></html>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}

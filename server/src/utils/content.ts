@@ -14,6 +14,32 @@ export function removeCodeBlocks(content: string): string {
   return out.trim();
 }
 
+/** 清理破损 Markdown，避免页面露出残留 * / ** */
+export function sanitizeBrokenMarkdown(md: string): string {
+  return md
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      const starHead = trimmed.match(
+        /^\*{1,2}\s*\**\s*【\s*(.+?)\s*】\s*\**\s*(.*)$/,
+      );
+      if (starHead && !trimmed.startsWith('- ') && !trimmed.startsWith('#')) {
+        const rest = starHead[2]?.trim();
+        return rest ? `## ${starHead[1]} ${rest}` : `## ${starHead[1]}`;
+      }
+      let out = line.replace(/^(\s*)\*\s+(?!\*)/g, '$1- ');
+      out = out.replace(/\*\*\s+([^*]+?)\s+\*\*/g, '**$1**');
+      out = out.replace(/\*{1,}\s*$/g, '');
+      out = out.replace(/^(\s*(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+)?)\*{1,}\s*/, '$1');
+      return out;
+    })
+    .join('\n')
+    .replace(/\*\*([^*]+)\*\*/g, '\u0001$1\u0002')
+    .replace(/[*＊]/g, '')
+    .replace(/\u0001/g, '**')
+    .replace(/\u0002/g, '**');
+}
+
 export function extractTitle(content: string, fallback = '无标题'): string {
   // Markdown 一级标题
   const md = content.match(/^\s*#\s+(.+)$/m);
